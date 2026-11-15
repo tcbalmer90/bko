@@ -1,0 +1,14 @@
+name: Keep BKO awake
+on:
+  schedule:
+    - cron: '17 20 */3 * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the BKO database
+        run: |
+          curl -fsS -X POST "https://zblktbwzptfafbuobjkv.supabase.co/rest/v1/rpc/ping" \
+            -H "apikey: sb_publishable_hHhqP6Nm0rF3t3BDE8shXA_3QRw0vL4" \
+            -H "Content-Type: application/json" -d '{}'
