@@ -7,7 +7,9 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const app = () => $('#app');
 const STATUS = [['go-to', 'Go-to'], ['good', 'Good'], ['mixed', 'Mixed'], ['new', 'Not sorted yet'], ['avoid', "Don't order again"]];
-const CUISINES = ['Thai', 'Pizza', 'Chinese', 'Vietnamese', 'Indian', 'Italian', 'Burgers', 'Kebabs', 'Turkish', 'Chicken', 'Japanese', 'Mexican', 'Wraps', 'Other'];
+const CUISINES = ['Thai', 'Pizza', 'Chinese', 'Vietnamese', 'Indian', 'Italian', 'Burgers', 'Pub', 'Kebabs', 'Turkish', 'Chicken', 'Japanese', 'Mexican', 'Wraps'];
+const MODES = ['Pick up', 'Delivery', 'Eat in'];
+const modesOf = g => !g ? [] : g === 'Both' ? ['Pick up', 'Delivery'] : g.split(',').map(x => x.trim()).filter(Boolean);
 const APPS = ['Uber Eats', 'DoorDash', 'Menulog', 'Direct'];
 const VERDICT = { go: '★ Order again', ok: 'OK', no: '✕ Skip' };
 const ICON = {
@@ -245,15 +247,15 @@ route(/^\/place\/([\w-]+)$/, pid => {
   <div class="stack">
     <div class="chips">
       <span class="v ${p.status === 'go-to' ? 'go' : p.status === 'avoid' ? 'no' : ''}">${p.status === 'go-to' ? '★ ' : ''}${esc(st[1])}</span>
-      ${p.get_mode ? `<span class="chip info">${esc(p.get_mode)}</span>` : ''}${(p.order_via || []).map(a => `<span class="chip info">${esc(a)}</span>`).join('')}
+      ${modesOf(p.get_mode).map(m => `<span class="chip info">${esc(m)}</span>`).join('')}${(p.order_via || []).map(a => `<span class="chip info">${esc(a)}</span>`).join('')}
       ${p.price ? `<span class="chip info on" style="color:var(--mus)">${esc(p.price)}</span>` : ''}
     </div>
     ${(p.house_rules || []).length ? `<div class="rules"><div class="rt">House rules</div>${p.house_rules.map(esc).join('<br>')}</div>` : ''}
     <div><div class="pair">${avgBox('Tom')}${avgBox('Caley')}</div><span class="muted" style="font-size:14px;display:block;margin-top:8px">Average score out of 10</span></div>
     <section>
       <div class="row-between"><h2 class="h" style="font-size:22px">What we've tried</h2><button class="link" id="addDish">+ Dish</button></div>
-      ${ds.length ? ds.map(d => `<button class="dish" data-d="${d.id}"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:16px">${esc(d.name)}</b>${ticks(d)}</div>
-        ${d.note ? `<div class="n">${esc(d.note)}</div>` : ''}</div>${vchip(d.verdict)}</button>`).join('') : '<p class="muted">No dishes yet.</p>'}
+      ${ds.length ? ds.map(d => `<div class="dish">${dthumb(d)}<button class="dish-main" data-d="${d.id}"><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:16px">${esc(d.name)}</b>${ticks(d)}</div>
+        ${d.note ? `<div class="n">${esc(d.note)}</div>` : ''}</div>${vchip(d.verdict)}</button></div>`).join('') : '<p class="muted">No dishes yet.</p>'}
     </section>
     ${p.notes ? `<section><h2 class="h" style="font-size:22px;margin-bottom:8px">Notes</h2><p style="margin:0;line-height:1.45;white-space:pre-line">${esc(p.notes)}</p></section>` : ''}
     ${phs.length ? `<section><h2 class="h" style="font-size:22px;margin-bottom:10px">Photos</h2><div class="gallery">${phs.map(x => `<button class="ph" data-ph="${esc(x.path)}" style="${img(x.path)}" aria-label="Open photo"></button>`).join('')}</div></section>` : ''}
@@ -263,6 +265,7 @@ route(/^\/place\/([\w-]+)$/, pid => {
     <a class="btn" href="#/snap?place=${p.id}">${ICON.cam('#FFFDF7')} Snap a meal from here</a>
   </div>`;
   app().onclick = e => {
+    const dp = e.target.closest('[data-dp]'); if (dp) return photoPicker(db.dishes.find(x => x.id === dp.dataset.dp), { after: render });
     const d = e.target.closest('[data-d]'); if (d) return dishSheet(db.dishes.find(x => x.id === d.dataset.d));
     const ph = e.target.closest('[data-ph]'); if (ph) return viewer(ph.dataset.ph, pid);
     if (e.target.id === 'addDish') return dishSheet(null, pid);
@@ -271,11 +274,75 @@ route(/^\/place\/([\w-]+)$/, pid => {
 function viewer(path, pid) {
   const v = document.createElement('div'); v.className = 'viewer';
   v.innerHTML = `<div style="display:flex;flex-direction:column;gap:14px;align-items:center"><img src="${urlCache[path]}" alt="">
-    <div style="display:flex;gap:10px"><button class="btn ghost" style="min-height:46px;width:auto" id="cv">Use as cover</button><button class="btn ghost" style="min-height:46px;width:auto" id="cl">Close</button></div></div>`;
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center"><button class="btn ghost" style="min-height:46px;width:auto" id="ud">Use for a dish</button><button class="btn ghost" style="min-height:46px;width:auto" id="cv">Use as cover</button><button class="btn ghost" style="min-height:46px;width:auto" id="cl">Close</button></div></div>`;
   document.body.appendChild(v);
   v.onclick = async e => {
+    if (e.target.id === 'ud') { v.remove(); return pickDishFor(path, pid); }
     if (e.target.id === 'cv') { await api.update('places', pid, { cover_path: path }); await refresh(); v.remove(); render(); toast('Cover photo updated'); }
     else if (e.target.id === 'cl' || e.target === v) v.remove();
+  };
+}
+
+/* ---------- dish photos ---------- */
+function dthumb(d) {
+  return d.photo_path && urlCache[d.photo_path]
+    ? `<button class="dthumb ph" data-dp="${d.id}" style="${img(d.photo_path)}" aria-label="Change photo for ${esc(d.name)}"></button>`
+    : `<button class="dthumb empty-th" data-dp="${d.id}" aria-label="Add a photo for ${esc(d.name)}">${ICON.cam('#B3261E').replace(/30/g, '22')}</button>`;
+}
+async function setDishPhoto(d, path) {
+  await api.update('dishes', d.id, { photo_path: path });
+  if (path) { const ph = db.photos.find(x => x.path === path); if (ph && !ph.dish_id) await api.update('photos', ph.id, { dish_id: d.id }); }
+  d.photo_path = path;
+}
+function photoPicker(d, opts = {}) {
+  const orderFirst = opts.orderId ? orderPhotos(opts.orderId) : [];
+  const pool = [...orderFirst, ...photosOf(d.place_id).filter(x => !orderFirst.includes(x))];
+  const bg = document.createElement('div'); bg.className = 'sheet-bg';
+  bg.innerHTML = `<div class="sheet stack">
+    <div class="row-between"><h2 class="h" style="font-size:22px">Photo for ${esc(d.name)}</h2><button class="link" id="x">Close</button></div>
+    ${d.photo_path ? `<div class="ph" style="height:200px;border-radius:14px;border:2px solid var(--grill);${img(d.photo_path)}"></div>` : ''}
+    <input type="file" id="pf" accept="image/*" hidden>
+    <button class="btn" id="np">${ICON.cam('#FFFDF7')} Take or choose a new photo</button>
+    ${pool.length ? `<div><span class="lbl">Or pick one already in BKO</span><div class="pick-grid">${pool.map(x =>
+      `<button class="ph ${x.path === d.photo_path ? 'on' : ''}" data-pp="${esc(x.path)}" style="${img(x.path)}" aria-label="Use this photo"></button>`).join('')}</div></div>` : ''}
+    ${d.photo_path ? '<button class="link" id="rp" style="align-self:center">Remove photo from this dish</button>' : ''}
+  </div>`;
+  document.body.appendChild(bg);
+  const done = async msg => { await refresh(); bg.remove(); toast(msg); (opts.after || render)(); };
+  bg.onclick = async e => {
+    if (e.target === bg || e.target.id === 'x') return bg.remove();
+    if (e.target.closest('#np')) return $('#pf', bg).click();
+    const pp = e.target.closest('[data-pp]');
+    if (pp) { await setDishPhoto(d, pp.dataset.pp); return done('Photo set for ' + d.name); }
+    if (e.target.id === 'rp') { await setDishPhoto(d, null); return done('Photo removed'); }
+  };
+  $('#pf', bg).onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const b = $('#np', bg); b.disabled = true; b.textContent = 'Uploading…';
+    try {
+      const blob = await compress(f); const path = `${d.place_id}/${opts.orderId || 'dish'}/${rid()}.jpg`;
+      await api.upload(path, blob);
+      await api.insert('photos', { place_id: d.place_id, order_id: opts.orderId || null, dish_id: d.id, path });
+      await setDishPhoto(d, path);
+      const p = place(d.place_id); if (p && !p.cover_path) await api.update('places', p.id, { cover_path: path });
+      await done('Photo added to ' + d.name);
+    } catch (x) { toast(x.message); b.disabled = false; b.textContent = 'Take or choose a new photo'; }
+  };
+}
+function pickDishFor(path, pid) {
+  const ds = dishesOf(pid);
+  const bg = document.createElement('div'); bg.className = 'sheet-bg';
+  bg.innerHTML = `<div class="sheet stack">
+    <div class="row-between"><h2 class="h" style="font-size:22px">Which dish is this?</h2><button class="link" id="x">Close</button></div>
+    <div class="ph" style="height:180px;border-radius:14px;border:2px solid var(--grill);${img(path)}"></div>
+    <div class="stack tight">${ds.map(d => `<button class="mrow" data-pd="${d.id}">${d.photo_path ? `<span class="ph" style="width:40px;height:40px;border-radius:8px;flex-shrink:0;${img(d.photo_path)}"></span>` : ''}<span class="nm">${esc(d.name)}</span>${d.photo_path === path ? '<span class="v go">Current</span>' : ''}</button>`).join('')}</div>
+  </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = async e => {
+    if (e.target === bg || e.target.id === 'x') return bg.remove();
+    const b = e.target.closest('[data-pd]'); if (!b) return;
+    const d = db.dishes.find(x => x.id === b.dataset.pd);
+    await setDishPhoto(d, path); await refresh(); bg.remove(); toast('Photo set for ' + d.name); render();
   };
 }
 
@@ -287,6 +354,7 @@ function dishSheet(d, pid) {
   bg.innerHTML = `<div class="sheet stack">
     <div class="row-between"><h2 class="h" style="font-size:24px">${isNew ? 'Add a dish' : 'Dish'}</h2><button class="link" id="x">Close</button></div>
     <div><label class="lbl" for="dn">Name</label><input class="input" id="dn" value="${esc(d.name)}" placeholder="e.g. Massaman beef"></div>
+    ${isNew ? '' : `<div><span class="lbl">Photo</span><div style="display:flex;align-items:center;gap:12px">${dthumb(d).replace('dthumb', 'dthumb big')}<button class="link" data-dp="${d.id}">${d.photo_path ? 'Change photo' : 'Add a photo'}</button></div></div>`}
     <div><span class="lbl">Verdict</span><div class="vbtns" id="vb">${['go', 'ok', 'no'].map(v => `<button class="${v} ${verdict === v ? 'on' : ''}" data-v="${v}">${VERDICT[v]}</button>`).join('')}</div></div>
     <div><span class="lbl">Favourite</span><div style="display:flex;gap:8px">
       <button class="tick ${fav ? 'on' : ''} ${initial(me.name)}" id="fv">${fav ? '✓ ' : ''}${esc(me.name)}</button>
@@ -299,6 +367,7 @@ function dishSheet(d, pid) {
   const close = () => bg.remove();
   bg.onclick = async e => {
     if (e.target === bg || e.target.id === 'x') return close();
+    if (e.target.closest('[data-dp]')) { close(); return photoPicker(d, { after: () => { render(); dishSheet(db.dishes.find(x => x.id === d.id)); } }); }
     const vb = e.target.closest('[data-v]');
     if (vb) { verdict = verdict === vb.dataset.v ? null : vb.dataset.v; bg.querySelectorAll('#vb button').forEach(b => b.classList.toggle('on', b.dataset.v === verdict)); return; }
     if (e.target.id === 'fv') { fav = !fav; e.target.classList.toggle('on', fav); e.target.textContent = (fav ? '✓ ' : '') + me.name; return; }
@@ -317,15 +386,19 @@ function dishSheet(d, pid) {
 route(/^\/place-form(?:\/([\w-]+))?$/, (pid, params) => {
   const p = pid ? place(pid) : null;
   const f = p ? { ...p, order_via: [...(p.order_via || [])] } : { name: params.get('name') || '', suburb: '', cuisine: '', get_mode: '', order_via: [], price: '', status: 'new', house_rules: [], notes: '' };
+  f.modes = modesOf(f.get_mode);
   const ret = params.get('return');
-  const cuisineList = [...new Set([...CUISINES, ...db.places.map(x => x.cuisine).filter(Boolean)])];
+  const cuisineList = () => [...new Set([...CUISINES, ...db.places.map(x => x.cuisine).filter(Boolean), ...(f.cuisine ? [f.cuisine] : [])])].filter(c => c !== 'Other');
+  const cuisineChips = () => cuisineList().map(c => `<button type="button" class="chip ${f.cuisine === c ? 'on' : ''}" data-cu="${esc(c)}">${esc(c)}</button>`).join('') +
+    '<button type="button" class="chip add" id="cuAdd">+ Add a cuisine</button>';
   app().innerHTML = `
   <div class="top"><div class="left">${back_js()}<h1 class="h" style="font-size:26px">${p ? 'Edit place' : 'Add a place'}</h1></div>${mini}</div>
   <form class="stack" id="pf">
     <div><label class="lbl" for="pn">Name</label><input class="input" id="pn" required value="${esc(f.name)}" placeholder="e.g. Nung Leng"></div>
     <div><label class="lbl" for="ps">Suburb</label><input class="input" id="ps" value="${esc(f.suburb || '')}" placeholder="e.g. Darlinghurst"></div>
-    <div><span class="lbl">Cuisine</span><div class="chips" id="cu">${cuisineList.map(c => `<button type="button" class="chip ${f.cuisine === c ? 'on' : ''}" data-cu="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>
-    <div><span class="lbl">How do you get it?</span><div class="seg" id="gm">${['Pick up', 'Delivery', 'Both'].map(g => `<button type="button" class="${f.get_mode === g ? 'on' : ''}" data-gm="${g}">${g}</button>`).join('')}</div></div>
+    <div><span class="lbl">Cuisine</span><div class="chips" id="cu">${cuisineChips()}</div>
+      <div id="cuNew" style="display:none;gap:8px;margin-top:10px"><input class="input" id="cuIn" placeholder="e.g. Korean" style="flex:1"><button type="button" class="btn" id="cuOk" style="width:auto;min-height:52px">Add</button></div></div>
+    <div><span class="lbl">How do you get it? <span class="muted" style="font-weight:500">(pick any)</span></span><div class="chips" id="gm">${MODES.map(g => `<button type="button" class="chip must ${f.modes.includes(g) ? 'on' : ''}" data-gm="${g}">${f.modes.includes(g) ? '✓ ' : ''}${g}</button>`).join('')}</div></div>
     <div><span class="lbl">Order through <span class="muted" style="font-weight:500">(pick any)</span></span><div class="chips" id="ov">${APPS.map(a => `<button type="button" class="chip must ${f.order_via.includes(a) ? 'on' : ''}" data-ov="${a}">${f.order_via.includes(a) ? '✓ ' : ''}${a}</button>`).join('')}</div></div>
     <div><span class="lbl">Price</span><div class="seg" id="pr">${['$', '$$', '$$$'].map(x => `<button type="button" class="${f.price === x ? 'on' : ''}" data-pr="${x}" style="font-family:var(--slab)">${x}</button>`).join('')}</div></div>
     ${p ? `<div><span class="lbl">Where does it sit?</span><div class="chips" id="stx">${STATUS.map(([k, l]) => `<button type="button" class="chip ${f.status === k ? 'on' : ''}" data-st="${k}">${l}</button>`).join('')}</div></div>` : ''}
@@ -336,13 +409,26 @@ route(/^\/place-form(?:\/([\w-]+))?$/, (pid, params) => {
   </form>`;
   const one = (sel, attr, k) => $(sel).onclick = e => { const b = e.target.closest(`[data-${attr}]`); if (!b) return;
     f[k] = f[k] === b.dataset[attr] ? '' : b.dataset[attr]; $(sel).querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset[attr] === f[k])); };
-  one('#cu', 'cu', 'cuisine'); one('#gm', 'gm', 'get_mode'); one('#pr', 'pr', 'price'); p && one('#stx', 'st', 'status');
+  one('#pr', 'pr', 'price'); p && one('#stx', 'st', 'status');
+  $('#cu').onclick = e => {
+    if (e.target.id === 'cuAdd') { $('#cuNew').style.display = 'flex'; $('#cuIn').focus(); return; }
+    const b = e.target.closest('[data-cu]'); if (!b) return;
+    f.cuisine = f.cuisine === b.dataset.cu ? '' : b.dataset.cu; $('#cu').innerHTML = cuisineChips();
+  };
+  const addCuisine = () => { const v = $('#cuIn').value.trim(); if (!v) return;
+    const match = cuisineList().find(c => c.toLowerCase() === v.toLowerCase());
+    f.cuisine = match || v.charAt(0).toUpperCase() + v.slice(1); $('#cuIn').value = ''; $('#cuNew').style.display = 'none'; $('#cu').innerHTML = cuisineChips(); };
+  $('#cuOk').onclick = addCuisine;
+  $('#cuIn').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCuisine(); } };
+  $('#gm').onclick = e => { const b = e.target.closest('[data-gm]'); if (!b) return; const g = b.dataset.gm;
+    f.modes = f.modes.includes(g) ? f.modes.filter(x => x !== g) : MODES.filter(x => x === g || f.modes.includes(x));
+    b.classList.toggle('on', f.modes.includes(g)); b.textContent = (f.modes.includes(g) ? '✓ ' : '') + g; };
   $('#ov').onclick = e => { const b = e.target.closest('[data-ov]'); if (!b) return; const a = b.dataset.ov;
     f.order_via = f.order_via.includes(a) ? f.order_via.filter(x => x !== a) : [...f.order_via, a];
     b.classList.toggle('on', f.order_via.includes(a)); b.textContent = (f.order_via.includes(a) ? '✓ ' : '') + a; };
   $('#pf').onsubmit = async e => {
     e.preventDefault(); const b = $('button[type=submit]', e.target); b.disabled = true;
-    const fields = { name: $('#pn').value.trim(), suburb: $('#ps').value.trim() || null, cuisine: f.cuisine || null, get_mode: f.get_mode || null,
+    const fields = { name: $('#pn').value.trim(), suburb: $('#ps').value.trim() || null, cuisine: f.cuisine || null, get_mode: f.modes.join(', ') || null,
       order_via: f.order_via, price: f.price || null, house_rules: $('#hr').value.split('\n').map(s => s.trim()).filter(Boolean), notes: $('#nt').value.trim() || null };
     if (p) fields.status = f.status || 'new';
     try {
@@ -427,9 +513,10 @@ route(/^\/snap$/, params => {
         b.textContent = `Uploading photo ${i + 1} of ${snapDraft.files.length}…`;
         const blob = await compress(snapDraft.files[i]); const path = `${pid}/${o.id}/${rid()}.jpg`;
         await api.upload(path, blob);
-        await api.insert('photos', { place_id: pid, order_id: o.id, dish_id: ids[0] || null, path });
+        const single = ids.length === 1 ? ids[0] : null;
+        await api.insert('photos', { place_id: pid, order_id: o.id, dish_id: single, path });
         if (i === 0) {
-          ids.forEach(id => { const d = db.dishes.find(x => x.id === id); if (d && !d.photo_path) api.update('dishes', id, { photo_path: path }); });
+          if (single) await api.update('dishes', single, { photo_path: path });
           if (!place(pid).cover_path) await api.update('places', pid, { cover_path: path });
         }
       }
@@ -458,9 +545,9 @@ route(/^\/score\/([\w-]+)$/, oid => {
         <span class="muted" style="font-size:15px">${fmtDate(o.ordered_on)}</span></div>
       ${phs.length ? `<div class="thumbs">${phs.map(x => `<div class="ph" style="${img(x.path)}"></div>`).join('')}</div>` : ''}
       <div class="dash"></div>
-      <span style="font-weight:700;font-size:16px">Dishes</span>
+      <span style="font-weight:700;font-size:16px">Dishes <span class="muted" style="font-weight:500">(tap a square to set its photo)</span></span>
       ${ds.length ? ds.map(d => `<div class="stack tight" data-dish="${d.id}" style="gap:8px">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:17px">${esc(d.name)}</b>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">${dthumb(d)}<b style="font-size:17px;flex:1;min-width:0">${esc(d.name)}</b>
             <button class="tick ${d[key] ? 'on' : ''} ${M}" data-fav="${d.id}">${d[key] ? '✓ ' : '♡ '}${esc(me.name)}</button></div>
           <div class="vbtns">${['go', 'ok', 'no'].map(v => `<button class="${v} ${d.verdict === v ? 'on' : ''}" data-v="${v}" data-vd="${d.id}">${VERDICT[v]}</button>`).join('')}</div>
           ${d[otherKey] ? `<span class="muted" style="font-size:14px">${otherName()} ticked this as a favourite</span>` : ''}
@@ -484,6 +571,8 @@ route(/^\/score\/([\w-]+)$/, oid => {
   $('#up').onclick = () => { score = touched ? Math.min(10, score + 1) : score; touched = true; show(); };
   $('#dn').onclick = () => { score = touched ? Math.max(1, score - 1) : score; touched = true; show(); };
   app().onclick = async e => {
+    const dp = e.target.closest('[data-dp]');
+    if (dp) { const cm = $('#cm').value; return photoPicker(db.dishes.find(x => x.id === dp.dataset.dp), { orderId: oid, after: () => { render(); $('#cm').value = cm; } }); }
     const vb = e.target.closest('[data-vd]');
     if (vb) { const d = db.dishes.find(x => x.id === vb.dataset.vd); const v = d.verdict === vb.dataset.v ? null : vb.dataset.v;
       d.verdict = v; vb.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
