@@ -80,7 +80,14 @@ textarea.input{min-height:90px;resize:vertical;line-height:1.4}
 .mrow.dim{opacity:.62}
 .mini-score{font-family:var(--slab);font-size:13px;padding:3px 7px;border-radius:7px}
 .mini-score.T{background:var(--red);color:var(--doc)}.mini-score.C{background:var(--mus)}
-.dish{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:2px dashed var(--line);width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left}
+.dish{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:2px dashed var(--line);width:100%}
+.dish-main{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:10px;background:none;border:0;padding:0;text-align:left}
+.dthumb{width:56px;height:56px;flex-shrink:0;border-radius:10px;border:2px solid var(--grill);padding:0}
+.dthumb.big{width:96px;height:96px;border-radius:14px}
+.empty-th{background:var(--doc);border-style:dashed;border-color:var(--red);display:flex;align-items:center;justify-content:center}
+.pick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pick-grid button{aspect-ratio:1;border-radius:10px;border:2px solid var(--grill);padding:0}
+.pick-grid button.on{outline:4px solid var(--mus);outline-offset:-2px}
 .dish:last-child{border-bottom:none}
 .dish .n{font-size:14px;color:var(--mute);line-height:1.35;margin-top:3px}
 .rail{position:relative;padding-top:14px}
