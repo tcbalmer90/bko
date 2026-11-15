@@ -174,6 +174,8 @@ route(/^\/$/, () => {
     <a href="#/snap" class="btn" style="min-height:96px;justify-content:flex-start;padding:16px 20px;gap:16px;border-radius:22px;box-shadow:0 5px 0 #2B1B17">
       <span style="width:58px;height:58px;border-radius:50%;background:var(--cream);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ICON.cam('#B3261E')}</span>
       <span style="display:flex;flex-direction:column;gap:4px;text-align:left"><span class="h" style="font-size:26px">Snap a meal</span><span style="font-size:15px;font-weight:500;color:#FBE7C2">Photo now, scores after you eat</span></span></a>
+    <a href="#/dinner" class="dinner-card" aria-label="What's for dinner? Pick a meal at random">
+      <span class="dc-top">Tonight's special</span><span class="dc-q">What's for dinner?</span><span class="dc-go">Spin the board ›</span></a>
     <section>
       <div class="row-between" style="margin-bottom:10px"><h2 class="h" style="font-size:22px">On the rail</h2>
         <span style="font-weight:600;font-size:15px;color:${rail.length ? 'var(--red)' : 'var(--mute)'}">${rail.length ? rail.length + ' to score' : 'All scored'}</span></div>
@@ -195,6 +197,110 @@ function railCard(o) {
     <span class="muted" style="font-size:14px">${esc(p.name)}</span>
     <span class="go">${mine ? esc(otherName()) + ' still to score' : 'Score it'}</span></a>`;
 }
+
+/* ---------- what's for dinner ---------- */
+let dinnerPrefs = { mode: 'Any', cuisines: [], adventurous: false };
+const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function dinnerPool() {
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const recent = new Set(db.orders.filter(o => o.ordered_on >= weekAgo).map(o => o.place_id));
+  const okMode = p => {
+    if (dinnerPrefs.mode === 'Any') return true;
+    const m = modesOf(p.get_mode);
+    if (m.includes(dinnerPrefs.mode)) return true;
+    if (!m.length && dinnerPrefs.mode !== 'Eat in') return true; // not set yet: don't rule it out
+    return false;
+  };
+  const verdicts = dinnerPrefs.adventurous ? ['go', 'ok', null] : ['go'];
+  return db.dishes.map(d => ({ d, p: place(d.place_id) })).filter(({ d, p }) => p && p.status !== 'avoid' && verdicts.includes(d.verdict) && okMode(p)
+    && (!dinnerPrefs.cuisines.length || dinnerPrefs.cuisines.includes(p.cuisine)))
+    .map(x => {
+      let w = 1 + (x.d.fav_tom ? 1 : 0) + (x.d.fav_caley ? 1 : 0) + (x.d.fav_tom && x.d.fav_caley ? 1 : 0);
+      if (x.p.status === 'go-to') w *= 1.5;
+      if (x.d.verdict !== 'go') w *= 0.6;
+      if (recent.has(x.p.id)) w *= 0.15;
+      return { ...x, w };
+    });
+}
+function weightedPick(pool, avoid) {
+  const list = pool.length > 1 && avoid ? pool.filter(x => x.d.id !== avoid) : pool;
+  let r = Math.random() * list.reduce((a, x) => a + x.w, 0);
+  for (const x of list) { r -= x.w; if (r <= 0) return x; }
+  return list[list.length - 1];
+}
+function ding() {
+  try {
+    const C = window.AudioContext || window.webkitAudioContext; if (!C) return; const ac = new C();
+    [[1568, 0], [2093, 0.09]].forEach(([f, t]) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, ac.currentTime + t); g.gain.exponentialRampToValueAtTime(0.25, ac.currentTime + t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + t + 1.2); o.connect(g).connect(ac.destination); o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 1.3); });
+  } catch (_) {}
+}
+let lastPick = null;
+route(/^\/dinner$/, () => {
+  const cuisines = [...new Set(db.places.filter(p => p.status !== 'avoid').map(p => p.cuisine).filter(Boolean))].sort();
+  app().innerHTML = `
+  <div class="top"><div class="left">${back('#/')}<h1 class="h" style="font-size:26px">What's for dinner?</h1></div>${mini}</div>
+  <div class="stack">
+    <div class="spin-board" id="sb" aria-live="polite"><span class="sb-top">Tonight's special</span><span class="sb-dish" id="sbd">?</span><span class="sb-place" id="sbp">Spin the board</span></div>
+    <button class="btn" id="spin">Spin the board</button>
+    <div id="result"></div>
+    <details class="card" style="padding:14px 16px" id="filt" ${dinnerPrefs.cuisines.length || dinnerPrefs.mode !== 'Any' || dinnerPrefs.adventurous ? 'open' : ''}>
+      <summary style="font-weight:700;font-size:17px;cursor:pointer">In the mood for…</summary>
+      <div class="stack tight" style="margin-top:12px">
+        <span class="lbl" style="margin:0">How</span>
+        <div class="chips" id="dm">${['Any', ...MODES].map(m => `<button class="chip ${dinnerPrefs.mode === m ? 'on' : ''}" data-m="${m}">${m}</button>`).join('')}</div>
+        <span class="lbl" style="margin:8px 0 0">Cuisine <span class="muted" style="font-weight:500">(pick any, or none for everything)</span></span>
+        <div class="chips" id="dc">${cuisines.map(c => `<button class="chip must ${dinnerPrefs.cuisines.includes(c) ? 'on' : ''}" data-c="${esc(c)}">${dinnerPrefs.cuisines.includes(c) ? '✓ ' : ''}${esc(c)}</button>`).join('')}</div>
+        <button class="chip ${dinnerPrefs.adventurous ? 'on' : ''}" id="adv" style="align-self:flex-start;margin-top:8px">${dinnerPrefs.adventurous ? '✓ ' : ''}Feeling adventurous (include OK and untried dishes)</button>
+      </div>
+    </details>
+    <p class="muted" id="poolNote" style="margin:0;font-size:14px;text-align:center"></p>
+  </div>`;
+  const note = () => { const n = dinnerPool().length; $('#poolNote').textContent = n ? `Choosing from ${n} dish${n === 1 ? '' : 'es'}. Favourites come up more, and places you've had this week less.` : 'Nothing matches. Loosen the filters a little.'; $('#spin').disabled = !n; };
+  note();
+  const showResult = x => {
+    const d = x.d, p = x.p; lastPick = d.id;
+    $('#sbd').textContent = d.name; $('#sbp').textContent = p.name;
+    $('#sb').classList.add('landed');
+    const other = dishesOf(p.id).filter(o => o.id !== d.id && o.verdict === 'go').slice(0, 3);
+    $('#result').innerHTML = `<article class="docket stack tight pick" style="padding:16px;gap:12px">
+      ${d.photo_path || coverOf(p) ? `<div class="ph" style="height:190px;border-radius:10px;border:2px solid var(--grill);${img(d.photo_path || coverOf(p))}"></div>` : ''}
+      <div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h2 class="h" style="font-size:24px">${esc(d.name)}</h2>${ticks(d)}</div>
+        <a href="#/place/${p.id}" class="muted" style="font-weight:600">${esc(p.name)}${p.cuisine ? ' · ' + esc(p.cuisine) : ''} ›</a></div>
+      ${d.note ? `<p style="margin:0;line-height:1.45">${esc(d.note)}</p>` : ''}
+      ${(p.house_rules || []).length ? `<div class="rules" style="font-size:15px"><div class="rt">House rules</div>${p.house_rules.map(esc).join('<br>')}</div>` : ''}
+      ${other.length ? `<p style="margin:0;font-size:15px"><b>Goes well with:</b> ${other.map(o => esc(o.name)).join(', ')}</p>` : ''}
+      <div class="chips">${modesOf(p.get_mode).concat(p.order_via || []).map(a => `<span class="chip info">${esc(a)}</span>`).join('')}</div>
+      <a class="btn" href="#/snap?place=${p.id}&dish=${encodeURIComponent(d.name)}">Lock it in</a>
+      <button class="btn ghost" id="again">Not feeling it, spin again</button>
+    </article>`;
+    $('#again').onclick = () => spin();
+    $('#result').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  };
+  const spin = () => {
+    const pool = dinnerPool(); if (!pool.length) return;
+    const pick = weightedPick(pool, lastPick);
+    $('#result').innerHTML = ''; $('#sb').classList.remove('landed'); $('#spin').disabled = true;
+    if (reduceMotion()) { ding(); showResult(pick); $('#spin').disabled = false; $('#spin').textContent = 'Spin again'; return; }
+    let n = 0, delay = 55; const steps = 16 + Math.floor(Math.random() * 6);
+    const tick = () => {
+      if (!$('#sb')) return; // left the screen mid-spin
+      if (n >= steps) { $('#sb').classList.add('flash'); setTimeout(() => { const sb = $('#sb'); sb && sb.classList.remove('flash'); }, 700); ding(); showResult(pick); $('#spin').disabled = false; $('#spin').textContent = 'Spin again'; return; }
+      const r = pool[Math.floor(Math.random() * pool.length)];
+      $('#sbd').textContent = r.d.name; $('#sbp').textContent = r.p.name; n++; delay *= 1.14; setTimeout(tick, delay);
+    };
+    tick();
+  };
+  $('#spin').onclick = spin;
+  $('#dm').onclick = e => { const b = e.target.closest('[data-m]'); if (!b) return; dinnerPrefs.mode = b.dataset.m;
+    $('#dm').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); note(); };
+  $('#dc').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; const c = b.dataset.c;
+    dinnerPrefs.cuisines = dinnerPrefs.cuisines.includes(c) ? dinnerPrefs.cuisines.filter(x => x !== c) : [...dinnerPrefs.cuisines, c];
+    const on = dinnerPrefs.cuisines.includes(c); b.classList.toggle('on', on); b.textContent = (on ? '✓ ' : '') + c; note(); };
+  $('#adv').onclick = e => { dinnerPrefs.adventurous = !dinnerPrefs.adventurous; e.target.classList.toggle('on', dinnerPrefs.adventurous);
+    e.target.textContent = (dinnerPrefs.adventurous ? '✓ ' : '') + 'Feeling adventurous (include OK and untried dishes)'; note(); };
+});
 
 /* ---------- menu ---------- */
 let menuFilter = { cuisine: 'All', q: '' };
@@ -448,6 +554,7 @@ route(/^\/place-form(?:\/([\w-]+))?$/, (pid, params) => {
 let snapDraft = { files: [], previews: [], place: null, dishes: [''], date: null };
 route(/^\/snap$/, params => {
   if (params.get('place')) snapDraft.place = params.get('place');
+  if (params.get('dish') && !snapDraft.dishes.some(x => x.trim())) snapDraft.dishes = [params.get('dish')];
   if (!snapDraft.date) snapDraft.date = todayISO();
   const recentIds = [...new Set(db.orders.map(o => o.place_id))];
   const ordered = [...recentIds.map(place).filter(Boolean), ...db.places.filter(p => !recentIds.includes(p.id))];
